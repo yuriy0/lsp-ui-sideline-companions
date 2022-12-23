@@ -22,13 +22,6 @@ Does not compare equality predicates."
     (equal table1 table2)
     ))
 
-;;;###autoload
-(defun my/flycheck-filtering (err)
-  ;; (message (format "%s" err))
-  ;; t ;; note that returning non-nil prevents further functions being called
-  nil
-)
-
 (defun lsp-diagnostic-get-related-info (diag)
   "Get the first 'related info' field of an LSP diagnostic"
   (if-let (
@@ -438,7 +431,6 @@ CALLBACK is the status callback passed by Flycheck."
   (cond
    (lsp-ui-sideline-companions-mode
     (advice-add 'lsp-ui-sideline--diagnostics :after #'my/lsp-ui-sideline--diagnostics--after)
-    (add-hook 'flycheck-process-error-functions #'my/flycheck-filtering -50)
     (advice-add 'lsp-diagnostics--flycheck-start :around #'my/lsp-diagnostics--flycheck-start-around)
     (when flycheck-mode (flycheck-buffer))
 
@@ -448,7 +440,6 @@ CALLBACK is the status callback passed by Flycheck."
     )
    (t
     (advice-remove 'lsp-ui-sideline--diagnostics #'my/lsp-ui-sideline--diagnostics--after)
-    (remove-hook 'flycheck-process-error-functions #'my/flycheck-filtering)
     (advice-remove 'lsp-diagnostics--flycheck-start #'my/lsp-diagnostics--flycheck-start-around)
 
     (my/lsp-diagnostics-pre-send-to-flycheck)
