@@ -191,6 +191,10 @@ CALLBACK is the status callback passed by Flycheck."
 (defun delete-overlay-closure(o)
   (lambda() (delete-overlay o)))
 
+(defun my/align-to (spec)
+  "Returns an :align-to space with the given spec"
+  (propertize " " 'display `(space :align-to ,spec)))
+
 (defun my/lsp-diagnostic-make-companion-overlap (origin-diag diag diag-origin-range text-properties &optional override-msg)
   (-let* (
           (mode-inline nil)
@@ -206,6 +210,9 @@ CALLBACK is the status callback passed by Flycheck."
            )
           ((p0 p1) (get-logical-line-start-end (+ line-pos source-loc-offset)))
 
+          (start-point (+ char-pos p0))
+          ((start-point-pixel-x . _) (window-absolute-pixel-position start-point))
+
           (base-msg (or override-msg (lsp:diagnostic-message diag)))
           (base-msg (concat "↑" base-msg))
 
@@ -218,7 +225,7 @@ CALLBACK is the status callback passed by Flycheck."
            )
 
           (msg (concat
-                 (apply 'concat (-repeat char-pos " "))
+                (my/align-to `(+ left-margin (,start-point-pixel-x)))
                 base-msg
                 ))
 
@@ -226,7 +233,7 @@ CALLBACK is the status callback passed by Flycheck."
                        (+ 1 p1)
                        (+ 1 p1) (current-buffer) t t))
           (ov-inline (make-overlay
-                      (+ char-pos p0)
+                      start-point
                       (+ end-char-pos p0) (current-buffer) nil t))
          )
     (push (delete-overlay-closure ov-subline) my/lsp-diags-overlays)
