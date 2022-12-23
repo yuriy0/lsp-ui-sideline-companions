@@ -441,6 +441,10 @@ CALLBACK is the status callback passed by Flycheck."
     (add-hook 'flycheck-process-error-functions #'my/flycheck-filtering -50)
     (advice-add 'lsp-diagnostics--flycheck-start :around #'my/lsp-diagnostics--flycheck-start-around)
     (when flycheck-mode (flycheck-buffer))
+
+    ;; should we just refuse to enable the minor mode here?
+    (when (not (alist-get major-mode lsp-sideline-companions-show-diagnostic-as-companion-by-major-mode))
+      (message "Major mode %s does not support lsp-ui-sideline-companions-mode (see `lsp-sideline-companions-show-diagnostic-as-companion-by-major-mode')" major-mode))
     )
    (t
     (advice-remove 'lsp-ui-sideline--diagnostics #'my/lsp-ui-sideline--diagnostics--after)
