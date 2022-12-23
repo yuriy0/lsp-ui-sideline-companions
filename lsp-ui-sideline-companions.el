@@ -87,14 +87,23 @@ identifies the related error).
     (`nil
      t)))
 
-
 ;;;###autoload
-(defun my/lsp-diagnostics--flycheck-start-around (fn checker callback)
+(cl-defun my/lsp-diagnostics--flycheck-start-around (fn checker callback)
   "start an LSP syntax check with CHECKER.
 
 CALLBACK is the status callback passed by Flycheck."
 
   (remove-hook 'lsp-on-idle-hook #'lsp-diagnostics--flycheck-buffer t)
+
+  ;; if the diagnostics from LSP haven't changed, don't update the flycheck
+  ;; errors!  this might cause overlays to have the wrong position. see
+  ;; commentary in `my/flycheck-report-failed-syntax-check' for more details
+  (when (not my/lsp-diagnostics-dirty)
+    (funcall callback 'interrupted nil)
+    (cl-return-from my/lsp-diagnostics--flycheck-start-around))
+  (setq my/lsp-diagnostics-dirty nil)
+
+  ;; this clears any existing sideline overlays
   (my/lsp-diagnostics-pre-send-to-flycheck)
 
   (let* (
@@ -160,6 +169,11 @@ CALLBACK is the status callback passed by Flycheck."
 (defvar-local my/lsp-associated-overlays nil)
 
 (defvar-local my/lsp-all-buffer-diags nil)
+
+(defvar my/lsp-diagnostics-dirty nil)
+
+(defun my/lsp-diagnostics-updated-hook()
+  (setq my/lsp-diagnostics-dirty t))
 
 (defface lsp-ui-sideline-companions-subline-base
   '((t
@@ -229,6 +243,7 @@ CALLBACK is the status callback passed by Flycheck."
                       start-point
                       (+ end-char-pos p0) (current-buffer) nil t))
          )
+
     (push (delete-overlay-closure ov-subline) my/lsp-diags-overlays)
     (push (delete-overlay-closure ov-inline) my/lsp-diags-overlays)
 
@@ -417,6 +432,37 @@ CALLBACK is the status callback passed by Flycheck."
     )
   )
 
+;; the only purpose of this is to keep the OLD errors list if Flycheck was
+;; interrupted. This prevents error overlays from moving around if flycheck gets
+;; retriggered but LSP diagnostics have not re-run, then the LSP diagnostics
+;; refer to the old buffer positions. Then creating new flycheck errors from
+;; those ends up with the flycheck overlays on wrong positions.
+;;
+;; It's still possible for the overlays to be wrong after any buffer changes,
+;; but they're more likely to remain correct due to how emacs handles overlays
+;; and how errors are typically reported (i.e. if a function call has an error,
+;; then the function name is highlighted; if you change the arguments to the
+;; function, the error squiggly will remain on the function name until LSP mode
+;; re-runs).
+;;
+;; this appears to be broadly applicable to all LSP modes flychecks and has
+;; little to do with this package. However its especially important here because
+;; we add so many overlays.
+(defun my/flycheck-report-failed-syntax-check (&optional status)
+  "Report a failed Flycheck syntax check with STATUS.
+
+STATUS is a status symbol for `flycheck-report-status',
+defaulting to `errored'.
+
+Clear Flycheck state, run `flycheck-syntax-check-failed-hook' and
+report an error STATUS."
+
+  (if (not (eq status 'interrupted)) (flycheck-clear))
+
+  (setq flycheck-current-syntax-check nil)
+  (run-hooks 'flycheck-syntax-check-failed-hook)
+  (flycheck-report-status (or status 'errored)))
+
 
 (defvar lsp-ui-sideline-companions-mode-map
   (let ((map (make-sparse-keymap)))
@@ -432,6 +478,13 @@ CALLBACK is the status callback passed by Flycheck."
    (lsp-ui-sideline-companions-mode
     (advice-add 'lsp-ui-sideline--diagnostics :after #'my/lsp-ui-sideline--diagnostics--after)
     (advice-add 'lsp-diagnostics--flycheck-start :around #'my/lsp-diagnostics--flycheck-start-around)
+    (add-hook 'lsp-diagnostics-updated-hook #'my/lsp-diagnostics-updated-hook)
+    (add-function :override (local 'flycheck-report-failed-syntax-check) #'my/flycheck-report-failed-syntax-check)
+
+    ;; called here so that the first update is always considered dirty
+    (my/lsp-diagnostics-updated-hook)
+
+    ;; run flycheck if we just enabled companions, which shows the overlays (eventually)
     (when flycheck-mode (flycheck-buffer))
 
     ;; should we just refuse to enable the minor mode here?
@@ -441,6 +494,8 @@ CALLBACK is the status callback passed by Flycheck."
    (t
     (advice-remove 'lsp-ui-sideline--diagnostics #'my/lsp-ui-sideline--diagnostics--after)
     (advice-remove 'lsp-diagnostics--flycheck-start #'my/lsp-diagnostics--flycheck-start-around)
+    (remove-hook 'lsp-diagnostics-updated-hook #'my/lsp-diagnostics-updated-hook)
+    (advice-remove 'flycheck-report-failed-syntax-check #'my/flycheck-report-failed-syntax-check)
 
     (my/lsp-diagnostics-pre-send-to-flycheck)
     )
