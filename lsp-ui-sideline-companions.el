@@ -165,12 +165,11 @@ CALLBACK is the status callback passed by Flycheck."
 
 
 (defvar-local my/lsp-diags-overlays nil)
-
 (defvar-local my/lsp-associated-overlays nil)
-
 (defvar-local my/lsp-all-buffer-diags nil)
 
 (defvar my/lsp-diagnostics-dirty nil)
+(defvar my/lsp-companions-tracking-point-functions nil)
 
 (defun my/lsp-diagnostics-updated-hook()
   (setq my/lsp-diagnostics-dirty t))
@@ -202,6 +201,33 @@ CALLBACK is the status callback passed by Flycheck."
   "Returns an :align-to space with the given spec"
   (propertize " " 'display `(space :align-to ,spec)))
 
+(defun my/post-buffer-change-hook(&rest _args)
+  (-each my/lsp-companions-tracking-point-functions #'funcall))
+
+(defun my/make-var-to-function(func)
+"\"Pixel Specification for Spaces\" says this about the potential values of `:align-to':
+  ... If num is a symbol, symbol, its buffer-local variable binding is used; that binding can be either a number or a cons cell of the forms shown above ..
+
+This allows us to have totally dynamic spacing via align-to (very
+cool!) but also requires that we have a unique symbol for every
+space we want to create in this way. This function converts a
+closure to such a unique symbol, and registers the symbol in an
+appropriate place so that the closure is called again on every
+buffer change to update the value of that symbol. It returns a
+list of two elements, the first being the uninterned symbol which
+you can use in `:align-to' as described in the manual; and the
+second is a function which you must call to stop the variable
+being update when you no longer need it (otherwise, you leak memory)
+"
+  (-let*
+      ((var (make-symbol "magic"))
+       (fn (lambda() (set var (funcall func))))
+       )
+    (set var (funcall func))
+    (add-to-list 'my/lsp-companions-tracking-point-functions fn)
+
+    (list var (lambda() (delete fn my/lsp-companions-tracking-point-functions)))))
+
 (defun my/lsp-diagnostic-make-companion-overlap (origin-diag diag diag-origin-range text-properties &optional override-msg)
   (-let* (
           (mode-inline nil)
@@ -218,7 +244,14 @@ CALLBACK is the status callback passed by Flycheck."
           ((p0 p1) (get-logical-line-start-end (+ line-pos source-loc-offset)))
 
           (start-point (+ char-pos p0))
-          ((start-point-pixel-x . _) (window-absolute-pixel-position start-point))
+          (start-point-m (copy-marker start-point t))
+          (current-window (selected-window))
+
+          ((align-to-var del-align-to-var)
+           (my/make-var-to-function
+            (lambda()
+              (list (car (window-absolute-pixel-position start-point-m current-window)))
+              )))
 
           (base-msg (or override-msg (lsp:diagnostic-message diag)))
           (base-msg (concat "↑" base-msg))
@@ -232,7 +265,7 @@ CALLBACK is the status callback passed by Flycheck."
            )
 
           (msg (concat
-                (my/align-to `(+ left-margin (,start-point-pixel-x)))
+                (my/align-to `(+ left-margin ,align-to-var))
                 base-msg
                 ))
 
@@ -246,6 +279,7 @@ CALLBACK is the status callback passed by Flycheck."
 
     (push (delete-overlay-closure ov-subline) my/lsp-diags-overlays)
     (push (delete-overlay-closure ov-inline) my/lsp-diags-overlays)
+    (push del-align-to-var my/lsp-diags-overlays)
 
     (overlay-put ov-subline 'intangible t)
     (overlay-put ov-subline 'after-string (concat msg "\n"))
@@ -257,9 +291,8 @@ CALLBACK is the status callback passed by Flycheck."
 
 
 (defun my/lsp-diagnostics-clear-companion-overlays ()
-  (-each my/lsp-diags-overlays #'funcall)
-  (setq my/lsp-diags-overlays nil)
-  )
+  (--each my/lsp-diags-overlays (with-demoted-errors "Internal error %S" (funcall it)))
+  (setq my/lsp-diags-overlays nil))
 
 (defun my/lsp-diagnostics-pre-send-to-flycheck ()
   (my/lsp-diagnostics-clear-companion-overlays)
@@ -479,6 +512,7 @@ report an error STATUS."
     (advice-add 'lsp-ui-sideline--diagnostics :after #'my/lsp-ui-sideline--diagnostics--after)
     (advice-add 'lsp-diagnostics--flycheck-start :around #'my/lsp-diagnostics--flycheck-start-around)
     (add-hook 'lsp-diagnostics-updated-hook #'my/lsp-diagnostics-updated-hook)
+    (add-hook 'after-change-functions #'my/post-buffer-change-hook)
     (add-function :override (local 'flycheck-report-failed-syntax-check) #'my/flycheck-report-failed-syntax-check)
 
     ;; called here so that the first update is always considered dirty
@@ -495,6 +529,7 @@ report an error STATUS."
     (advice-remove 'lsp-ui-sideline--diagnostics #'my/lsp-ui-sideline--diagnostics--after)
     (advice-remove 'lsp-diagnostics--flycheck-start #'my/lsp-diagnostics--flycheck-start-around)
     (remove-hook 'lsp-diagnostics-updated-hook #'my/lsp-diagnostics-updated-hook)
+    (remove-hook 'after-change-functions #'my/post-buffer-change-hook)
     (advice-remove 'flycheck-report-failed-syntax-check #'my/flycheck-report-failed-syntax-check)
 
     (my/lsp-diagnostics-pre-send-to-flycheck)
