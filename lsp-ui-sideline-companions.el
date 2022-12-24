@@ -169,7 +169,7 @@ CALLBACK is the status callback passed by Flycheck."
 (defvar-local my/lsp-all-buffer-diags nil)
 
 (defvar my/lsp-diagnostics-dirty nil)
-(defvar my/lsp-companions-tracking-point-functions nil)
+(defvar-local my/lsp-companions-tracking-point-functions (make-hash-table :weakness 'key :test 'eq))
 
 (defun my/lsp-diagnostics-updated-hook()
   (setq my/lsp-diagnostics-dirty t))
@@ -191,8 +191,7 @@ CALLBACK is the status callback passed by Flycheck."
 (defvar lsp-ui-sideline-companions-delay 0.0)
 
 (defun my/lsp-diagnostics-find-exact-range (diags range)
-  (-filter (lambda (i) (ht-equal?-rec (lsp:diagnostic-range i) range)) diags)
-)
+  (-filter (lambda (i) (ht-equal?-rec (lsp:diagnostic-range i) range)) diags))
 
 (defun delete-overlay-closure(o)
   (lambda() (delete-overlay o)))
@@ -202,7 +201,9 @@ CALLBACK is the status callback passed by Flycheck."
   (propertize " " 'display `(space :align-to ,spec)))
 
 (defun my/post-buffer-change-hook(&rest _args)
-  (-each my/lsp-companions-tracking-point-functions #'funcall))
+  (ht-aeach (funcall value key) my/lsp-companions-tracking-point-functions)
+  (when (= (ht-size my/lsp-companions-tracking-point-functions) 0)
+    (remove-hook 'after-change-functions #'my/post-buffer-change-hook)))
 
 (defun my/make-var-to-function(func)
 "\"Pixel Specification for Spaces\" says this about the potential values of `:align-to':
@@ -213,20 +214,18 @@ cool!) but also requires that we have a unique symbol for every
 space we want to create in this way. This function converts a
 closure to such a unique symbol, and registers the symbol in an
 appropriate place so that the closure is called again on every
-buffer change to update the value of that symbol. It returns a
-list of two elements, the first being the uninterned symbol which
-you can use in `:align-to' as described in the manual; and the
-second is a function which you must call to stop the variable
-being update when you no longer need it (otherwise, you leak memory)
-"
+buffer change to update the value of that symbol.
+
+This function the **uninterned** symbol which you can use in
+`:align-to' as described in the manual."
   (-let*
-      ((var (make-symbol "magic"))
-       (fn (lambda() (set var (funcall func))))
+      ((var (gensym "magic"))
+       (fn (lambda (var_) (set var_ (funcall func))))
        )
     (set var (funcall func))
-    (add-to-list 'my/lsp-companions-tracking-point-functions fn)
-
-    (list var (lambda() (delete fn my/lsp-companions-tracking-point-functions)))))
+    (puthash var fn my/lsp-companions-tracking-point-functions)
+    (add-hook 'after-change-functions #'my/post-buffer-change-hook nil t)
+    var))
 
 (defun my/lsp-diagnostic-make-companion-overlap (origin-diag diag diag-origin-range text-properties &optional override-msg)
   (-let* (
@@ -247,7 +246,7 @@ being update when you no longer need it (otherwise, you leak memory)
           (start-point-m (copy-marker start-point t))
           (current-window (selected-window))
 
-          ((align-to-var del-align-to-var)
+          (align-to-var
            (my/make-var-to-function
             (lambda()
               (list (car (window-absolute-pixel-position start-point-m current-window)))
@@ -279,7 +278,6 @@ being update when you no longer need it (otherwise, you leak memory)
 
     (push (delete-overlay-closure ov-subline) my/lsp-diags-overlays)
     (push (delete-overlay-closure ov-inline) my/lsp-diags-overlays)
-    (push del-align-to-var my/lsp-diags-overlays)
 
     (overlay-put ov-subline 'intangible t)
     (overlay-put ov-subline 'after-string (concat msg "\n"))
@@ -512,7 +510,6 @@ report an error STATUS."
     (advice-add 'lsp-ui-sideline--diagnostics :after #'my/lsp-ui-sideline--diagnostics--after)
     (advice-add 'lsp-diagnostics--flycheck-start :around #'my/lsp-diagnostics--flycheck-start-around)
     (add-hook 'lsp-diagnostics-updated-hook #'my/lsp-diagnostics-updated-hook)
-    (add-hook 'after-change-functions #'my/post-buffer-change-hook)
     (add-function :override (local 'flycheck-report-failed-syntax-check) #'my/flycheck-report-failed-syntax-check)
 
     ;; called here so that the first update is always considered dirty
@@ -529,7 +526,6 @@ report an error STATUS."
     (advice-remove 'lsp-ui-sideline--diagnostics #'my/lsp-ui-sideline--diagnostics--after)
     (advice-remove 'lsp-diagnostics--flycheck-start #'my/lsp-diagnostics--flycheck-start-around)
     (remove-hook 'lsp-diagnostics-updated-hook #'my/lsp-diagnostics-updated-hook)
-    (remove-hook 'after-change-functions #'my/post-buffer-change-hook)
     (advice-remove 'flycheck-report-failed-syntax-check #'my/flycheck-report-failed-syntax-check)
 
     (my/lsp-diagnostics-pre-send-to-flycheck)
