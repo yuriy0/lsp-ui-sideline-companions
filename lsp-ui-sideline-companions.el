@@ -109,6 +109,34 @@ Each predicate should return:
 "
   :local t)
 
+(defcustom lsp-sideline-companions-align-companion-overlay-mode
+  'pixel
+  "Determines how to align companion overlays to their related error
+positions.
+
+- `column' means align to the column of the related error. This
+  is the most obvious and simple method but fails in some
+  cases (see other options).
+
+- `pixel' means align to the real pixel location of the related
+  error, not to the column position. This is useful when there
+  are other overlays on the line which push the visual start
+  position of the related away from the column position.
+"
+  :type
+  '(choice
+    (const :tag "Column Position" column)
+    (const :tag "Pixel Position" pixel)))
+
+(defcustom lsp-sideline-companions-align-companion-overlay-dynamically
+  t
+  "If non-nil, then companion overlays are aligned dynamically, so
+that if buffer text changes where the overlay would appear, the
+overlay will move during redisplay. This has not-insignificant
+performance cost"
+  :type
+  'boolean)
+
 ;;;###autoload
 (defun my/lsp-diagnostics-partition-associated-message (filter-fn all-diags diag)
   (pcase (funcall filter-fn all-diags diag)
@@ -251,6 +279,10 @@ CALLBACK is the status callback passed by Flycheck."
   "Returns an :align-to space with the given spec"
   (propertize " " 'display `(space :align-to ,spec)))
 
+(defun my/spacing (spec)
+  "Returns an :width space with the given spec"
+  (propertize " " 'display `(space :width ,spec)))
+
 (defun my/post-buffer-change-hook(&rest _args)
   (ht-aeach (funcall value key) my/lsp-companions-tracking-point-functions)
   (when (= (ht-size my/lsp-companions-tracking-point-functions) 0)
@@ -278,6 +310,11 @@ This function the **uninterned** symbol which you can use in
     (add-hook 'after-change-functions #'my/post-buffer-change-hook nil t)
     var))
 
+(defun my/make-pixel-spec-from-function(func)
+  (if lsp-sideline-companions-align-companion-overlay-dynamically
+      (my/make-var-to-function func)
+    (funcall func)))
+
 (defun my/prepend-before-lines(prefix0 prefixs str)
   (->> str
        s-lines
@@ -289,6 +326,36 @@ This function the **uninterned** symbol which you can use in
 (defun window-relative-pixel-position-x (point window)
   (- (car (window-absolute-pixel-position point window))
      (nth 0 (window-body-pixel-edges window))))
+
+(defun my/column-of-marker(m)
+  (with-current-buffer (marker-buffer m)
+    (save-excursion (goto-char m) (current-column))))
+
+(defun my/lsp-diagnostic-make-companion-offset-spacing (start-point)
+  (pcase lsp-sideline-companions-align-companion-overlay-mode
+    (`pixel
+     (let* ((start-point-m (copy-marker start-point t))
+            (current-window (selected-window))
+            )
+       (my/align-to
+       `(+ left-margin
+           ,(my/make-pixel-spec-from-function
+            (lambda()
+              ;; a spec like `(numberp)' means distance in pixels
+              (list
+               (window-relative-pixel-position-x start-point-m current-window)))))))
+     )
+
+    (`column
+     (my/spacing ;; note: for some unknown reason, align-to doesn't work with the char-width unit in font locked buffers???
+      `(+ left-margin
+         ,(let* ((start-point-m (copy-marker start-point t)))
+            (my/make-pixel-spec-from-function
+             (lambda()
+               ;; a spec like `numberp' means distance in char-width units (i.e. columns)
+               (my/column-of-marker start-point-m)
+               ))))
+     ))))
 
 (defun my/lsp-diagnostic-make-companion-overlap (origin-diag diag diag-origin-range text-properties &optional override-msg)
   (-let* (
@@ -304,16 +371,7 @@ This function the **uninterned** symbol which you can use in
            (lsp:diagnostic-range diag)
            )
           ((p0 p1) (get-logical-line-start-end (+ line-pos source-loc-offset)))
-
           (start-point (+ char-pos p0))
-          (start-point-m (copy-marker start-point t))
-          (current-window (selected-window))
-
-          (align-to-var
-           (my/make-var-to-function
-            (lambda()
-              (list
-               (window-relative-pixel-position-x start-point-m current-window)))))
 
           (base-msg (or override-msg (lsp:diagnostic-message diag)))
           (base-msg (concat lsp-sideline-companions-line-identifier-string base-msg))
@@ -326,7 +384,7 @@ This function the **uninterned** symbol which you can use in
              )
            )
 
-          (align-to-sp (my/align-to `(+ left-margin ,align-to-var)))
+          (align-to-sp (my/lsp-diagnostic-make-companion-offset-spacing start-point))
 
           (msg (my/prepend-before-lines
                 align-to-sp
