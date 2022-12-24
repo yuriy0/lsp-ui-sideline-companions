@@ -286,6 +286,10 @@ This function the **uninterned** symbol which you can use in
 
 (defconst lsp-sideline-companions-line-identifier-string "↑")
 
+(defun window-relative-pixel-position-x (point window)
+  (- (car (window-absolute-pixel-position point window))
+     (nth 0 (window-body-pixel-edges window))))
+
 (defun my/lsp-diagnostic-make-companion-overlap (origin-diag diag diag-origin-range text-properties &optional override-msg)
   (-let* (
           (mode-inline nil)
@@ -308,8 +312,8 @@ This function the **uninterned** symbol which you can use in
           (align-to-var
            (my/make-var-to-function
             (lambda()
-              (list (car (window-absolute-pixel-position start-point-m current-window)))
-              )))
+              (list
+               (window-relative-pixel-position-x start-point-m current-window)))))
 
           (base-msg (or override-msg (lsp:diagnostic-message diag)))
           (base-msg (concat lsp-sideline-companions-line-identifier-string base-msg))
