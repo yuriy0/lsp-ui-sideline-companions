@@ -310,10 +310,11 @@ This function the **uninterned** symbol which you can use in
     (add-hook 'after-change-functions #'my/post-buffer-change-hook nil t)
     var))
 
-(defun my/make-pixel-spec-from-function(func)
-  (if lsp-sideline-companions-align-companion-overlay-dynamically
-      (my/make-var-to-function func)
-    (funcall func)))
+(defmacro my/make-pixel-spec-handling-mode(&rest forms)
+  `(if lsp-sideline-companions-align-companion-overlay-dynamically
+      (my/make-var-to-function (lambda() ,@forms))
+    ,@forms
+    ))
 
 (defun my/prepend-before-lines(prefix0 prefixs str)
   (->> str
@@ -339,23 +340,23 @@ This function the **uninterned** symbol which you can use in
             )
        (my/align-to
        `(+ left-margin
-           ,(my/make-pixel-spec-from-function
-            (lambda()
-              ;; a spec like `(numberp)' means distance in pixels
-              (list
-               (window-relative-pixel-position-x start-point-m current-window)))))))
+           ,(my/make-pixel-spec-handling-mode
+             ;; a spec like `(numberp)' means distance in pixels
+             (list
+              (window-relative-pixel-position-x start-point-m current-window))))))
      )
 
     (`column
      (my/spacing ;; note: for some unknown reason, align-to doesn't work with the char-width unit in font locked buffers???
       `(+ left-margin
          ,(let* ((start-point-m (copy-marker start-point t)))
-            (my/make-pixel-spec-from-function
-             (lambda()
-               ;; a spec like `numberp' means distance in char-width units (i.e. columns)
-               (my/column-of-marker start-point-m)
-               ))))
-     ))))
+            (my/make-pixel-spec-handling-mode
+             ;; a spec like `numberp' means distance in char-width units
+             ;; (i.e. columns) minus one because the column of point is the
+             ;; column AFTER point, we want the column BEFORE point
+             (max (- (my/column-of-marker start-point-m) 1) 0)
+             )))
+      ))))
 
 (defun my/lsp-diagnostic-make-companion-overlap (origin-diag diag diag-origin-range text-properties &optional override-msg)
   (-let* (
