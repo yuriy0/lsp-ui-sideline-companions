@@ -278,6 +278,14 @@ This function the **uninterned** symbol which you can use in
     (add-hook 'after-change-functions #'my/post-buffer-change-hook nil t)
     var))
 
+(defun my/prepend-before-lines(prefix0 prefixs str)
+  (->> str
+       s-lines
+       (-map-indexed (lambda(i x) (concat (if (= i 0) prefix0 prefixs) x)))
+       (s-join "\n")))
+
+(defconst lsp-sideline-companions-line-identifier-string "↑")
+
 (defun my/lsp-diagnostic-make-companion-overlap (origin-diag diag diag-origin-range text-properties &optional override-msg)
   (-let* (
           (mode-inline nil)
@@ -304,7 +312,7 @@ This function the **uninterned** symbol which you can use in
               )))
 
           (base-msg (or override-msg (lsp:diagnostic-message diag)))
-          (base-msg (concat "↑" base-msg))
+          (base-msg (concat lsp-sideline-companions-line-identifier-string base-msg))
 
           (base-msg-len (length base-msg))
           (ignore
@@ -314,8 +322,15 @@ This function the **uninterned** symbol which you can use in
              )
            )
 
-          (msg (concat
-                (my/align-to `(+ left-margin ,align-to-var))
+          (align-to-sp (my/align-to `(+ left-margin ,align-to-var)))
+
+          (msg (my/prepend-before-lines
+                align-to-sp
+                ;; adds extra space to offset to the position of the message
+                ;; text, which starts after the line identifier. this isn't
+                ;; really exact because the line identifier is a unicode
+                ;; character with potentially non-fixed width
+                (concat align-to-sp "  ")
                 base-msg
                 ))
 
