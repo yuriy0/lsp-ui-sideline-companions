@@ -22,6 +22,15 @@ Does not compare equality predicates."
     (equal table1 table2)
     ))
 
+;;;###autoload
+(defun my/copy-sequence-rec (x)
+  (cond
+   ((consp x)
+    (cons (my/copy-sequence-rec (car x)) (my/copy-sequence-rec (cdr x))))
+   ((hash-table-p x)
+    (ht<-alist (ht-map (lambda(a b) (cons (my/copy-sequence-rec a) (my/copy-sequence-rec b))) x)))
+   (t x)))
+
 (defun lsp-diagnostic-get-related-info (diag)
   "Get the first 'related info' field of an LSP diagnostic"
   (if-let (
@@ -43,10 +52,33 @@ Does not compare equality predicates."
       (and (equal (lsp:diagnostic-related-information-message diag-related-info) "original diagnostic")
            (lsp:location-range (lsp:diagnostic-related-information-location diag-related-info)))))
 
+
+(defun lsp-sideline-companions-generic-diagnostic-split-by-lines (_ diag)
+  (let* (
+         (msg (lsp:diagnostic-message diag))
+         (msg-lines (s-lines msg))
+         new-diag
+         )
+
+    (when (> (length msg-lines) 1)
+          (lsp:set-diagnostic-message diag (car msg-lines))
+
+          (list :new
+                (lsp:diagnostic-range diag)
+                (list
+                 (progn
+                  (setq new-diag (my/copy-sequence-rec diag))
+                  (lsp:set-diagnostic-message new-diag (s-join "\n" (cdr msg-lines)))
+                  new-diag)))
+          )
+    )
+  )
+
 (defcustom lsp-sideline-companions-show-diagnostic-as-companion-by-major-mode
   '(
     (rustic-mode . lsp-sideline-companions-rust-diagnostic-is-companion)
     (rust-mode . lsp-sideline-companions-rust-diagnostic-is-companion)
+    (typescript-ts-mode . lsp-sideline-companions-typescript-diagnostic-is-companion)
     )
   "Alist which maps buffer major modes to a predicate which
 determines if an LSP diagnostic in that buffer should be treated
@@ -57,13 +89,23 @@ Companions are not displayed in the sideline by
 corresponding source locations whenever the point is on the
 related error.
 
-Each predicate should return either `nil' to indicate that this
-diagnostic should not be treated specially; or `t' to treat it as
-a companion (in which case it this diagnostic should have a
-\"related info\" property, and the location range of that related
-info is used as the related error); or a LSP diagnostic range to
-treat it as a companion (in which case the returned value
-identifies the related error).
+Each predicate should return:
+ - `nil' to indicate that this diagnostic should not be treated specially (ie do nothing);
+
+ - `t' to treat it as a companion, in which case it this diagnostic should have a
+   \"related info\" property, and the location range of that related
+   info is used as the related error;
+
+ - a LSP diagnostic range (see `lsp-range?') to treat it as a
+   companion, in which case the returned value identifies the
+   related error;
+
+ - a list consisting of exactly three elements: the literal
+   `:new', a LSP diagnostic range, a list of LSP diagnostics, in
+   which case the related error is identified by the range, the
+   original diagnostic is not a companion, and the returned
+   diagnostics are new diagnostic to be used as companions for
+   the related error.
 "
   :local t)
 
@@ -75,8 +117,8 @@ identifies the related error).
          (progn
            (push (list range diag) my/lsp-associated-overlays)
            nil)
-       (message "Internal error: lsp-sideline-companions-show-diagnostic-as-companion-by-major-mode returned `t' for a diagnostic without an origin range")
-       t
+       (message "Internal error: lsp-sideline-companions-show-diagnostic-as-companion-by-major-mode returned `t' for a diagnostic without an origin range; ignoring")
+       (list diag)
        )
      )
 
@@ -84,8 +126,17 @@ identifies the related error).
      (push (list res diag) my/lsp-associated-overlays)
      nil)
 
+    (`(:new ,(and range (pred lsp-range?)) ,(and new-companions (pred (-all-p #'lsp-diagnostic?))))
+     (--each new-companions (push (list range it) my/lsp-associated-overlays))
+     (list diag))
+
     (`nil
-     t)))
+     (list diag))
+
+    (else
+     (message "Internal error: lsp-sideline-companions-show-diagnostic-as-companion-by-major-mode returned an unrecognized value %S; ignoring" else)
+     (list diag)
+     )))
 
 ;;;###autoload
 (cl-defun my/lsp-diagnostics--flycheck-start-around (fn checker callback)
@@ -113,7 +164,7 @@ CALLBACK is the status callback passed by Flycheck."
         )
     (setq my/lsp-all-buffer-diags diags)
     (->> (if filter-fn
-             (-filter (-partial #'my/lsp-diagnostics-partition-associated-message filter-fn diags) diags)
+             (-mapcat (-partial #'my/lsp-diagnostics-partition-associated-message filter-fn diags) diags)
            diags)
          (-map (-lambda ((&Diagnostic :message :severity? :tags? :code? :source?
                                       :range (&Range :start (&Position :line      start-line
