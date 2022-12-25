@@ -626,7 +626,7 @@ report an error STATUS."
 
 (defvar lsp-ui-sideline-companions-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-/") #'lsp-ui-sideline-companions-toggle)
+    (define-key map (kbd "C-?") #'lsp-ui-sideline-companions-toggle)
     map)
   "")
 
