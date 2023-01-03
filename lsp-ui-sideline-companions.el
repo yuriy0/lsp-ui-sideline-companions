@@ -78,7 +78,7 @@ Does not compare equality predicates."
   '(
     (rustic-mode . lsp-sideline-companions-rust-diagnostic-is-companion)
     (rust-mode . lsp-sideline-companions-rust-diagnostic-is-companion)
-    (typescript-ts-mode . lsp-sideline-companions-typescript-diagnostic-is-companion)
+    (typescript-ts-mode . lsp-sideline-companions-generic-diagnostic-split-by-lines)
     )
   "Alist which maps buffer major modes to a predicate which
 determines if an LSP diagnostic in that buffer should be treated
@@ -518,15 +518,26 @@ This function the **uninterned** symbol which you can use in
 
 (defvar-local my/lsp-ui-sideline-companions-create-closure nil)
 
+(defvar lsp-ui-sideline-companions-before-switch-line-hook nil)
+(defvar lsp-ui-sideline-companions-after-switch-line-hook nil)
+
 (defun lsp-ui-sideline-companions-set-enabled (enabled)
   (interactive)
   (if lsp-ui-sideline-companions-mode
       (progn
+        (overlay-recenter (point))
+
+        (with-demoted-errors "lsp-ui-sideline-companions-before-switch-line-hook error %S"
+          (run-hooks 'lsp-ui-sideline-companions-before-switch-line-hook))
+
         (my/lsp-diags-overlays-switch-line nil)
         (when (and enabled my/lsp-ui-sideline-companions-create-closure)
-              (funcall my/lsp-ui-sideline-companions-create-closure))
+          (funcall my/lsp-ui-sideline-companions-create-closure))
+
+        (with-demoted-errors "lsp-ui-sideline-companions-after-switch-line-hook error %S"
+          (run-hooks 'lsp-ui-sideline-companions-after-switch-line-hook))
         )
-    (message "Cannot enable sideline companions - mode is disable")
+    (message "Cannot enable sideline companions - mode is disabled")
     ))
 
 (defun lsp-ui-sideline-companions-enable ()
