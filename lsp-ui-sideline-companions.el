@@ -53,6 +53,22 @@ Does not compare equality predicates."
            (lsp:location-range (lsp:diagnostic-related-information-location diag-related-info)))))
 
 
+(defun count-leading-characters-p(s pred)
+  (let ((pos 0))
+    (while (and (< pos (length s))
+                (funcall pred (seq-elt s pos)))
+      (setq pos (+ 1 pos)))
+    pos))
+
+(defun count-leading-whitespace(s)
+  (count-leading-characters-p s (lambda(c) (memq c (list ?\s)))))
+
+(defun trim-shared-leading-whitespace(strs)
+  (let ((c (apply #'min (mapcar #'count-leading-whitespace strs))))
+    (if (> c 0)
+        (--map (seq-drop it c) strs)
+      strs)))
+
 (defun lsp-sideline-companions-generic-diagnostic-split-by-lines (_ diag)
   (let* (
          (msg (lsp:diagnostic-message diag))
@@ -68,7 +84,7 @@ Does not compare equality predicates."
                 (list
                  (progn
                   (setq new-diag (my/copy-sequence-rec diag))
-                  (lsp:set-diagnostic-message new-diag (s-join "\n" (cdr msg-lines)))
+                  (lsp:set-diagnostic-message new-diag (s-join "\n" (trim-shared-leading-whitespace (cdr msg-lines))))
                   new-diag)))
           )
     )
