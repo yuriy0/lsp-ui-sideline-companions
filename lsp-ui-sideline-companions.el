@@ -341,8 +341,10 @@ This function the **uninterned** symbol which you can use in
 (defconst lsp-sideline-companions-line-identifier-string "↑")
 
 (defun window-relative-pixel-position-x (point window)
-  (- (car (window-absolute-pixel-position point window))
-     (nth 0 (window-body-pixel-edges window))))
+  (when-let
+      ((p (car (window-absolute-pixel-position point window))))
+  (- p
+     (nth 0 (window-body-pixel-edges window)))))
 
 (defun my/column-of-marker(m)
   (with-current-buffer (marker-buffer m)
@@ -359,7 +361,7 @@ This function the **uninterned** symbol which you can use in
            ,(my/make-pixel-spec-handling-mode
              ;; a spec like `(numberp)' means distance in pixels
              (list
-              (window-relative-pixel-position-x start-point-m current-window))))))
+              (or (window-relative-pixel-position-x start-point-m current-window) 0))))))
      )
 
     (`column
