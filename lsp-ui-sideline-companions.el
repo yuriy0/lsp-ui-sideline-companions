@@ -195,6 +195,10 @@ CALLBACK is the status callback passed by Flycheck."
   ;; commentary in `my/flycheck-report-failed-syntax-check' for more details
   (when (not my/lsp-diagnostics-dirty)
     (funcall callback 'interrupted nil)
+
+    ;; using interupted seems to inhibit hooks which normally trigger change in
+    ;; sideline messages. calling this also
+    (lsp-ui-sideline--diagnostics-changed)
     (cl-return-from my/lsp-diagnostics--flycheck-start-around))
   (setq my/lsp-diagnostics-dirty nil)
 
