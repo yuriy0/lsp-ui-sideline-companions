@@ -5,6 +5,119 @@
 (require 'lsp-ui-sideline)
 (require 'flycheck)
 
+(defgroup lsp-ui-sideline-companions nil
+  "Splits lsp-ui sideline messages into multiple pieces based on relevant source locations."
+  :group 'tools
+  :group 'convenience
+  :group 'lsp-ui)
+
+
+(defface lsp-ui-sideline-companions-subline-base
+  '((t
+     :foreground "black"
+     ))
+  "Face for subline text for companion messages"
+  :group 'lsp-ui-sideline-companions)
+
+(defface lsp-ui-sideline-companions-inline-highlight
+  '((t
+     :box (:line-width (-1 . -1)
+           :color "dark slate gray"
+           :style nil))
+     )
+  "Face for inline highlighting of affected text when displaying lsp diagnostics"
+  :group 'lsp-ui-sideline-companions)
+
+
+(defcustom lsp-sideline-companions-show-diagnostic-as-companion-by-major-mode
+  '(
+    (rustic-mode . lsp-sideline-companions-rust-diagnostic-is-companion)
+    (rust-mode . lsp-sideline-companions-rust-diagnostic-is-companion)
+    (typescript-ts-mode . lsp-sideline-companions-generic-diagnostic-split-by-lines)
+    )
+  "Alist which maps buffer major modes to a predicate which
+determines if an LSP diagnostic in that buffer should be treated
+as a \"companion\".
+
+Companions are not displayed in the sideline by
+`lsp-ui-sideline-mode'. Instead, they are displayed under their
+corresponding source locations whenever the point is on the
+related error.
+
+Each predicate should return:
+ - `nil' to indicate that this diagnostic should not be treated specially (ie do nothing);
+
+ - `t' to treat it as a companion, in which case it this diagnostic should have a
+   \"related info\" property, and the location range of that related
+   info is used as the related error;
+
+ - a LSP diagnostic range (see `lsp-range?') to treat it as a
+   companion, in which case the returned value identifies the
+   related error;
+
+ - a list consisting of exactly three elements: the literal
+   `:new', a LSP diagnostic range, a list of LSP diagnostics, in
+   which case the related error is identified by the range, the
+   original diagnostic is not a companion, and the returned
+   diagnostics are new diagnostic to be used as companions for
+   the related error.
+"
+  :local t
+  :group 'lsp-ui-sideline-companions)
+
+(defcustom lsp-sideline-companions-align-companion-overlay-mode
+  'pixel
+  "Determines how to align companion overlays to their related error
+positions.
+
+- `column' means align to the column of the related error. This
+  is the most obvious and simple method but fails in some
+  cases (see other options).
+
+- `pixel' means align to the real pixel location of the related
+  error, not to the column position. This is useful when there
+  are other overlays on the line which push the visual start
+  position of the related away from the column position.
+"
+  :type
+  '(choice
+    (const :tag "Column Position" column)
+    (const :tag "Pixel Position" pixel))
+  :group 'lsp-ui-sideline-companions)
+
+(defcustom lsp-sideline-companions-align-companion-overlay-dynamically
+  t
+  "If non-nil, then companion overlays are aligned dynamically, so
+that if buffer text changes where the overlay would appear, the
+overlay will move during redisplay. This has not-insignificant
+performance cost"
+  :type
+  'boolean
+  :group 'lsp-ui-sideline-companions)
+
+(defcustom lsp-ui-sideline-companions-delay
+  0.0
+  "Determines how to display companions automatically while moving point through the buffer.
+
+- `0.0' means display companions as soon as point moves to a line
+  with a diagnostic.
+
+- any positive number means display companions after that
+  delay (in seconds) after point moves to a line with a
+  diagnostic.
+
+- `nil' means never display companions automatically based on the
+  movement of point. Note that companions are still hidden if the
+  point moves away from a line with a diagnostic.
+"
+  :type
+  '(choice
+    (const :tag "Never" nil)
+    (number :tag "After delay (seconds)")
+    (const :tag "Immediately" 0.0))
+  :group 'lsp-ui-sideline-companions)
+
+
 (defun ht-equal?-rec (table1 table2)
   "Return t if TABLE1 and TABLE2 have the same keys and values.
 Does not compare equality predicates."
@@ -89,69 +202,6 @@ Does not compare equality predicates."
           )
     )
   )
-
-(defcustom lsp-sideline-companions-show-diagnostic-as-companion-by-major-mode
-  '(
-    (rustic-mode . lsp-sideline-companions-rust-diagnostic-is-companion)
-    (rust-mode . lsp-sideline-companions-rust-diagnostic-is-companion)
-    (typescript-ts-mode . lsp-sideline-companions-generic-diagnostic-split-by-lines)
-    )
-  "Alist which maps buffer major modes to a predicate which
-determines if an LSP diagnostic in that buffer should be treated
-as a \"companion\".
-
-Companions are not displayed in the sideline by
-`lsp-ui-sideline-mode'. Instead, they are displayed under their
-corresponding source locations whenever the point is on the
-related error.
-
-Each predicate should return:
- - `nil' to indicate that this diagnostic should not be treated specially (ie do nothing);
-
- - `t' to treat it as a companion, in which case it this diagnostic should have a
-   \"related info\" property, and the location range of that related
-   info is used as the related error;
-
- - a LSP diagnostic range (see `lsp-range?') to treat it as a
-   companion, in which case the returned value identifies the
-   related error;
-
- - a list consisting of exactly three elements: the literal
-   `:new', a LSP diagnostic range, a list of LSP diagnostics, in
-   which case the related error is identified by the range, the
-   original diagnostic is not a companion, and the returned
-   diagnostics are new diagnostic to be used as companions for
-   the related error.
-"
-  :local t)
-
-(defcustom lsp-sideline-companions-align-companion-overlay-mode
-  'pixel
-  "Determines how to align companion overlays to their related error
-positions.
-
-- `column' means align to the column of the related error. This
-  is the most obvious and simple method but fails in some
-  cases (see other options).
-
-- `pixel' means align to the real pixel location of the related
-  error, not to the column position. This is useful when there
-  are other overlays on the line which push the visual start
-  position of the related away from the column position.
-"
-  :type
-  '(choice
-    (const :tag "Column Position" column)
-    (const :tag "Pixel Position" pixel)))
-
-(defcustom lsp-sideline-companions-align-companion-overlay-dynamically
-  t
-  "If non-nil, then companion overlays are aligned dynamically, so
-that if buffer text changes where the overlay would appear, the
-overlay will move during redisplay. This has not-insignificant
-performance cost"
-  :type
-  'boolean)
 
 ;;;###autoload
 (defun my/lsp-diagnostics-partition-associated-message (filter-fn all-diags diag)
@@ -273,21 +323,6 @@ CALLBACK is the status callback passed by Flycheck."
 (defun my/lsp-diagnostics-updated-hook()
   (setq my/lsp-diagnostics-dirty t))
 
-(defface lsp-ui-sideline-companions-subline-base
-  '((t
-     :foreground "black"
-     ))
-  "Face for subline text for companion messages")
-
-(defface lsp-ui-sideline-companions-inline-highlight
-  '((t
-     :box (:line-width (-1 . -1)
-           :color "dark slate gray"
-           :style nil))
-     )
-  "Face for inline highlighting of affected text when displaying lsp diagnostics")
-
-(defvar lsp-ui-sideline-companions-delay 0.0)
 
 (defun my/lsp-diagnostics-find-exact-range (diags range)
   (-filter (lambda (i) (ht-equal?-rec (lsp:diagnostic-range i) range)) diags))
